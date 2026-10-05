@@ -1,0 +1,22 @@
+# Virtual environment
+.venv/
+venv/
+ENV/
+
+# Environment variables & secrets
+.env
+*.env
+
+# Python cache & artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.spec
+
+# Generated video outputs & media
+*.mp4
+*.mov
+*.avi
+*.png
+*.jpg
+*.jpeg
