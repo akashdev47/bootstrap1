@@ -13,6 +13,9 @@ __pycache__/
 *$py.class
 *.spec
 
+# Logs
+*.log
+
 # Generated video outputs & media
 *.mp4
 *.mov
