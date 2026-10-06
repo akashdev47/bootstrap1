@@ -2,12 +2,14 @@
 Canva OAuth Helper CLI
 ----------------------
 Guides you through authorizing your Canva account with your registered Client ID.
-Runs a local callback listener or allows manual code pasting.
+Runs a local callback listener to capture the OAuth redirect.
 """
 
+import sys
 import webbrowser
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.parse
+from pathlib import Path
 from canva_client import CanvaClient
 
 callback_data = {"code": None, "state": None, "error": None}
@@ -21,13 +23,21 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
         if "code" in params:
             callback_data["code"] = params["code"][0]
             self.send_response(200)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
-            self.wfile.write(b"<h1>Canva Authorization Successful!</h1><p>You can close this tab and return to your terminal.</p>")
+            html = """
+            <html>
+            <body style="font-family: sans-serif; text-align: center; padding: 50px;">
+                <h1 style="color: #00c4cc;">Canva Authorization Successful!</h1>
+                <p>You can close this tab and return to your IDE.</p>
+            </body>
+            </html>
+            """
+            self.wfile.write(html.encode("utf-8"))
         elif "error" in params:
             callback_data["error"] = params.get("error_description", params["error"])[0]
             self.send_response(400)
-            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Type", "text/html; charset=utf-8")
             self.end_headers()
             self.wfile.write(b"<h1>Authorization Failed</h1><p>Check terminal for details.</p>")
         else:
@@ -35,57 +45,59 @@ class OAuthCallbackHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def log_message(self, format, *args):
-        # Suppress server request logging
         pass
 
 
 def main():
-    print("=" * 60)
-    print(" Canva OAuth 2.0 Authorization Setup")
-    print("=" * 60)
+    print("=" * 60, flush=True)
+    print(" Canva OAuth 2.0 Authorization Setup", flush=True)
+    print("=" * 60, flush=True)
 
     client = CanvaClient()
     auth_url, code_verifier, state = client.get_authorization_url()
 
-    print(f"\n1. In your Canva Developer Portal, make sure your Redirect URI is set to:")
-    print(f"   http://127.0.0.1:8080/oauth/callback\n")
-    print(f"2. Opening Canva authorization page in your browser...")
-    print(f"   (If it doesn't open automatically, copy and paste this URL into your browser):\n")
-    print(auth_url)
-    print("\n" + "-" * 60)
+    print(f"\nAuthorization URL generated:", flush=True)
+    print(auth_url, flush=True)
+    print("-" * 60, flush=True)
 
-    webbrowser.open(auth_url)
-
-    # Attempt to start temporary local callback server
+    # Try opening browser
     try:
-        server = HTTPServer(("127.0.0.1", 8080), OAuthCallbackHandler)
-        print("Waiting for callback on http://127.0.0.1:8080/oauth/callback ...")
-        # Handle single request
+        webbrowser.open(auth_url)
+    except Exception:
+        pass
+
+    parsed = urllib.parse.urlparse(client.redirect_uri)
+    host = parsed.hostname or "127.0.0.1"
+    port = parsed.port or 8080
+
+    print(f"Listening for OAuth callback on {client.redirect_uri} ...", flush=True)
+
+    bind_host = "0.0.0.0" if host in ("localhost", "127.0.0.1") else host
+    server = HTTPServer((bind_host, port), OAuthCallbackHandler)
+    server.timeout = 180  # Wait up to 3 minutes
+
+    while not callback_data["code"] and not callback_data["error"]:
         server.handle_request()
-        server.server_close()
-    except Exception as e:
-        print(f"Local server note: {e}")
 
-    code = callback_data.get("code")
+    server.server_close()
+
+    if callback_data["error"]:
+        print(f"\n[Error] Authorization failed: {callback_data['error']}", flush=True)
+        sys.exit(1)
+
+    code = callback_data["code"]
     if not code:
-        print("\nIf the callback did not redirect automatically, please paste the full redirect URL or the 'code' parameter here:")
-        user_input = input("Code or URL: ").strip()
-        if "code=" in user_input:
-            code = urllib.parse.parse_qs(urllib.parse.urlparse(user_input).query).get("code", [None])[0]
-        else:
-            code = user_input
+        print("\n[Error] No authorization code received within timeout.", flush=True)
+        sys.exit(1)
 
-    if not code:
-        print("[Error] No authorization code received.")
-        return
-
-    print("\nExchanging authorization code for access tokens...")
+    print(f"\nAuthorization code captured! Exchanging for tokens...", flush=True)
     try:
         tokens = client.exchange_code_for_token(code=code, code_verifier=code_verifier)
-        print("\n[Success] Canva authentication complete!")
-        print(f"Tokens securely cached in: .canva_tokens.json (git-ignored)")
+        print("\n[Success] Canva authentication complete!", flush=True)
+        print("Access and Refresh tokens have been securely cached in .canva_tokens.json", flush=True)
     except Exception as e:
-        print(f"\n[Error] Token exchange failed: {e}")
+        print(f"\n[Error] Token exchange failed: {e}", flush=True)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

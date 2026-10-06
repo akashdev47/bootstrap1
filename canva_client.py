@@ -31,24 +31,34 @@ class CanvaClient:
 
     DEFAULT_SCOPES = [
         "design:content:read",
-        "design:content:write",
         "design:meta:read",
-        "asset:read",
-        "asset:write",
         "profile:read",
-        "brandtemplate:content:read",
-        "brandtemplate:meta:read",
     ]
 
     def __init__(
         self,
         client_id: Optional[str] = None,
         client_secret: Optional[str] = None,
-        redirect_uri: str = "http://127.0.0.1:8080/oauth/callback",
+        redirect_uri: Optional[str] = None,
     ):
         self.client_id = client_id or os.getenv("CANVA_CLIENT_ID")
         self.client_secret = client_secret or os.getenv("CANVA_CLIENT_SECRET")
-        self.redirect_uri = redirect_uri
+        self.redirect_uri = (
+            redirect_uri
+            or os.getenv("CANVA_REDIRECT_URI")
+            or "http://127.0.0.1:8080/oauth/callback"
+        )
+
+        env_scopes = os.getenv("CANVA_SCOPES")
+        if env_scopes:
+            self.scopes = [s.strip() for s in env_scopes.split(",") if s.strip()]
+        else:
+            self.scopes = self.DEFAULT_SCOPES
+
+        self.session = requests.Session()
+        self.session.verify = False
+        import urllib3
+        urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
         if not self.client_id or not self.client_secret:
             raise ValueError(
@@ -78,7 +88,7 @@ class CanvaClient:
         """
         code_verifier, code_challenge = self._generate_pkce_pair()
         state = secrets.token_urlsafe(16)
-        scope_str = " ".join(scopes or self.DEFAULT_SCOPES)
+        scope_str = " ".join(scopes or self.scopes)
 
         params = {
             "response_type": "code",
@@ -108,7 +118,7 @@ class CanvaClient:
             "redirect_uri": self.redirect_uri,
         }
 
-        response = requests.post(self.TOKEN_URL, headers=headers, data=payload)
+        response = self.session.post(self.TOKEN_URL, headers=headers, data=payload)
         if not response.ok:
             raise RuntimeError(f"Token exchange failed ({response.status_code}): {response.text}")
 
@@ -135,7 +145,7 @@ class CanvaClient:
             "refresh_token": self._tokens["refresh_token"],
         }
 
-        response = requests.post(self.TOKEN_URL, headers=headers, data=payload)
+        response = self.session.post(self.TOKEN_URL, headers=headers, data=payload)
         if not response.ok:
             raise RuntimeError(f"Token refresh failed ({response.status_code}): {response.text}")
 
@@ -188,7 +198,7 @@ class CanvaClient:
 
     def get_user_profile(self) -> Dict[str, Any]:
         """Retrieve current user profile."""
-        response = requests.get(f"{self.API_BASE}/users/me", headers=self._get_auth_headers())
+        response = self.session.get(f"{self.API_BASE}/users/me", headers=self._get_auth_headers())
         response.raise_for_status()
         return response.json()
 
@@ -210,7 +220,7 @@ class CanvaClient:
                 "quality": quality,
             },
         }
-        response = requests.post(
+        response = self.session.post(
             f"{self.API_BASE}/exports",
             headers=self._get_auth_headers(),
             json=payload,
@@ -223,7 +233,7 @@ class CanvaClient:
 
     def get_export_job_status(self, job_id: str) -> Dict[str, Any]:
         """Check status of a running export job."""
-        response = requests.get(
+        response = self.session.get(
             f"{self.API_BASE}/exports/{job_id}",
             headers=self._get_auth_headers(),
         )
@@ -264,7 +274,7 @@ class CanvaClient:
                 if verbose:
                     print(f"[Canva] Render complete! Downloading video...")
 
-                res = requests.get(download_url, stream=True)
+                res = self.session.get(download_url, stream=True)
                 res.raise_for_status()
 
                 out_file = Path(output_path).resolve()
