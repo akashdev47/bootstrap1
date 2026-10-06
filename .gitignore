@@ -6,6 +6,9 @@ ENV/
 # Environment variables & secrets
 .env
 *.env
+*.token
+*token*.json
+.canva*.json
 
 # Python cache & artifacts
 __pycache__/
